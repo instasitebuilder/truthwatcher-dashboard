@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle, XCircle, Brain } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 type FactCheckItem = {
   id: number;
@@ -13,6 +14,7 @@ type FactCheckItem = {
   timestamp: string;
   source: string;
   speaker?: string | null;
+  api_processed: boolean;
 };
 
 const fetchBroadcasts = async () => {
@@ -41,6 +43,7 @@ const StatusIcon = ({ status }: { status: FactCheckItem["status"] }) => {
 
 const FactCheckingFeed = () => {
   const [items, setItems] = useState<FactCheckItem[]>([]);
+  const { toast } = useToast();
 
   const { data: initialData, isLoading } = useQuery({
     queryKey: ["broadcasts"],
@@ -52,6 +55,32 @@ const FactCheckingFeed = () => {
       setItems(initialData);
     }
   }, [initialData]);
+
+  const processNewBroadcast = async (broadcast: FactCheckItem) => {
+    if (broadcast.api_processed) return;
+
+    try {
+      const response = await supabase.functions.invoke('process-claim', {
+        body: { broadcastId: broadcast.id },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+
+      toast({
+        title: "AI Fact Check Complete",
+        description: `Processed claim with ${response.data.confidence}% confidence`,
+      });
+    } catch (error) {
+      console.error('Error processing claim:', error);
+      toast({
+        title: "Error",
+        description: "Failed to process claim with AI",
+        variant: "destructive",
+      });
+    }
+  };
 
   useEffect(() => {
     const channel = supabase
@@ -65,6 +94,10 @@ const FactCheckingFeed = () => {
         },
         (payload) => {
           console.log("Real-time update:", payload);
+          if (payload.eventType === "INSERT") {
+            const newBroadcast = payload.new as FactCheckItem;
+            processNewBroadcast(newBroadcast);
+          }
           // Refresh the data when changes occur
           fetchBroadcasts().then((newData) => setItems(newData));
         }
@@ -137,6 +170,12 @@ const FactCheckingFeed = () => {
                   <Badge variant="outline" className="bg-purple-500/10 text-purple-500">
                     {item.source}
                   </Badge>
+                  {item.api_processed && (
+                    <Badge variant="outline" className="bg-indigo-500/10 text-indigo-500">
+                      <Brain className="w-3 h-3 mr-1" />
+                      AI Processed
+                    </Badge>
+                  )}
                   <span className="text-xs text-muted-foreground">
                     {new Date(item.timestamp || item.created_at).toLocaleTimeString()}
                   </span>
