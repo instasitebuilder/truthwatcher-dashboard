@@ -9,12 +9,14 @@ import { useToast } from "@/hooks/use-toast";
 type FactCheckItem = {
   id: number;
   content: string;
-  confidence: number;
+  confidence: number | null;
   status: "verified" | "debunked" | "flagged" | "pending";
-  timestamp: string;
+  timestamp: string | null;
   source: string;
   speaker?: string | null;
-  api_processed: boolean;
+  api_processed?: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 const fetchBroadcasts = async () => {
@@ -177,7 +179,7 @@ const FactCheckingFeed = () => {
                     </Badge>
                   )}
                   <span className="text-xs text-muted-foreground">
-                    {new Date(item.timestamp || item.created_at).toLocaleTimeString()}
+                    {new Date(item.timestamp || item.created_at || '').toLocaleTimeString()}
                   </span>
                 </div>
               </div>
