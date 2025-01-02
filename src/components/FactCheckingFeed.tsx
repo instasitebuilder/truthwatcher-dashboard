@@ -1,81 +1,144 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, CheckCircle, XCircle } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 
 type FactCheckItem = {
-  id: string;
+  id: number;
   content: string;
   confidence: number;
-  status: "verified" | "debunked" | "flagged";
+  status: "verified" | "debunked" | "flagged" | "pending";
   timestamp: string;
+  source: string;
+  speaker?: string | null;
 };
 
-const mockData: FactCheckItem[] = [
-  {
-    id: "1",
-    content: "Climate change is causing record-breaking temperatures globally",
-    confidence: 0.95,
-    status: "verified",
-    timestamp: "2024-02-20T10:30:00Z",
-  },
-  {
-    id: "2",
-    content: "5G networks are spreading viruses",
-    confidence: 0.88,
-    status: "debunked",
-    timestamp: "2024-02-20T10:28:00Z",
-  },
-  {
-    id: "3",
-    content: "New study suggests link between diet and longevity",
-    confidence: 0.75,
-    status: "flagged",
-    timestamp: "2024-02-20T10:25:00Z",
-  },
-];
+const fetchBroadcasts = async () => {
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (error) throw error;
+  return data as FactCheckItem[];
+};
 
 const StatusIcon = ({ status }: { status: FactCheckItem["status"] }) => {
   switch (status) {
     case "verified":
-      return <CheckCircle className="h-5 w-5 text-success" />;
+      return <CheckCircle className="h-5 w-5 text-green-500" />;
     case "debunked":
-      return <XCircle className="h-5 w-5 text-error" />;
+      return <XCircle className="h-5 w-5 text-red-500" />;
     case "flagged":
-      return <AlertTriangle className="h-5 w-5 text-accent" />;
+      return <AlertTriangle className="h-5 w-5 text-yellow-500" />;
+    default:
+      return <AlertTriangle className="h-5 w-5 text-gray-500" />;
   }
 };
 
 const FactCheckingFeed = () => {
+  const [items, setItems] = useState<FactCheckItem[]>([]);
+
+  const { data: initialData, isLoading } = useQuery({
+    queryKey: ["broadcasts"],
+    queryFn: fetchBroadcasts,
+  });
+
+  useEffect(() => {
+    if (initialData) {
+      setItems(initialData);
+    }
+  }, [initialData]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("schema-db-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "broadcasts",
+        },
+        (payload) => {
+          console.log("Real-time update:", payload);
+          // Refresh the data when changes occur
+          fetchBroadcasts().then((newData) => setItems(newData));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  if (isLoading) {
+    return (
+      <Card className="w-full animate-pulse">
+        <CardHeader>
+          <CardTitle>Live Fact-Checking Feed</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-24 rounded-lg bg-muted animate-pulse"
+              ></div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="w-full animate-fade-in">
+    <Card className="w-full">
       <CardHeader>
-        <CardTitle>Live Fact-Checking Feed</CardTitle>
+        <CardTitle className="flex items-center justify-between">
+          <span>Live Fact-Checking Feed</span>
+          <Badge variant="outline" className="ml-2">
+            {items.length} claims
+          </Badge>
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          {mockData.map((item) => (
+          {items.map((item) => (
             <div
               key={item.id}
               className="flex items-start space-x-4 p-4 border rounded-lg hover:bg-accent/5 transition-colors"
             >
-              <StatusIcon status={item.status} />
+              <StatusIcon status={item.status || "pending"} />
               <div className="flex-1">
                 <p className="text-sm font-medium">{item.content}</p>
-                <div className="mt-1 flex items-center space-x-2">
+                <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Badge
                     variant="outline"
                     className={
-                      item.confidence > 0.8
-                        ? "bg-success/10 text-success"
-                        : item.confidence > 0.6
-                        ? "bg-accent/10 text-accent"
-                        : "bg-error/10 text-error"
+                      item.confidence && item.confidence > 80
+                        ? "bg-green-500/10 text-green-500"
+                        : item.confidence && item.confidence > 60
+                        ? "bg-yellow-500/10 text-yellow-500"
+                        : "bg-red-500/10 text-red-500"
                     }
                   >
-                    {Math.round(item.confidence * 100)}% confidence
+                    {item.confidence || 0}% confidence
+                  </Badge>
+                  {item.speaker && (
+                    <Badge variant="outline" className="bg-blue-500/10 text-blue-500">
+                      {item.speaker}
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="bg-purple-500/10 text-purple-500">
+                    {item.source}
                   </Badge>
                   <span className="text-xs text-muted-foreground">
-                    {new Date(item.timestamp).toLocaleTimeString()}
+                    {new Date(item.timestamp || item.created_at).toLocaleTimeString()}
                   </span>
                 </div>
               </div>
